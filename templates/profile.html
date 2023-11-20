@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %} My profile {% endblock %}
+{% block content %}
+<div class="row flex-xl-nowrap content" style="height:auto"> <pre>
+    <h1>My profile</h1>
+    <p>Username: {{ user.username }}</p>
+    <p>Password: {{ user.password }}</p>
+    <p>Email: {{ user.email }}</p>
+    {% for track in tracks %}
+        <p>Track: {{ track.id }} {{ track.filename }} {{ track.year }} {{ track.title }} {{ track.author_id }}</p>
+    {% endfor %}
+    </pre>  
+</div>
+{% endblock %}

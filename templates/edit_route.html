@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block head %}
+<script> {{ script | safe }} </script>
+<script>
+    function toggleTrack(self_id, map_id, track_id) {
+      var checkbox = document.getElementById(self_id);
+      if (checkbox.checked) {
+        document.getElementById("map").contentWindow[track_id].addTo(document.getElementById("map").contentWindow[map_id]);
+      } else {
+        document.getElementById("map").contentWindow[track_id].remove();
+      }
+    }
+
+    function goToPoint(map_id, lat, lon, point_index) {
+        document.getElementById("map").contentWindow[map_id].flyTo([lat, lon], 14);
+    }
+</script>
+{% endblock %}
+{% block content %}
+<div class="row flex-xl-nowrap content" style="height: calc(100vh - 60px);">
+    <div class="col-12">
+        <div class="row flex-xl-nowrap content" style="height:70vh;padding:0;">
+            <div class="col-8">
+                {{ map | safe }}
+            </div>
+            <div class="col-4" style="background-color:burlywood; padding:0">
+                <table class="table table-sm table-dark" style="padding:0">
+                    <thead>
+                        <tr>
+                            <th scope="col">Gdzie</th>
+                            <th scope="col">Czas</th>
+                            <th scope="col">Uznane jako</th>
+                            <th score="col">Zmiana czasu</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for distance_th, time, error_type, time_change in points %}
+                            <tr>
+                                {{ distance_th | safe }}
+                                <td>{{ time }}</td>
+                                <td>{{ error_type }}</td>
+                                {{ time_change | safe }}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="row flex-xl-nowrap content" style="overflow-x:auto; height:calc(100% - 70vh);padding:0;">
+            <div class="col-12" style="background-color: aqua;">
+                <table class="table table-sm table-dark">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            {% for distance_th in distances %}
+                                {{ distance_th | safe }}
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for times in table_user %}
+                        <tr>
+                            {{ times[0] | safe }}
+                            {% for time in times[1:]: %}
+                                <td>{{ time }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

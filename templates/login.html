@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+{% endblock %}
+{% block title %}
+    Login
+{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12 login-card-container">
+        <div class="login-card">
+            <div class="login-card-logo">
+                <img src="logo.png" alt="logo">
+            </div>
+            <div class="login-card-header">
+                <h1>Sign In</h1>
+                <div>Please login to use the platform</div>
+            </div>
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-danger" role="alert">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            <form class="login-card-form" method="post" action="#">
+                <div class="form-item">
+                    <span class="form-item-icon material-symbols-rounded"></span>
+                    <input name="uname" type="text" placeholder="Enter Username" id="uname_form" 
+                    autofocus required>
+                </div>
+                <div class="form-item">
+                    <span class="form-item-icon material-symbols-rounded"></span>
+                    <input name="password" type="password" placeholder="Enter Password" id="password_form"
+                     required>
+                </div>
+                <div class="form-item-other">
+                    <div class="checkbox">
+                        <input type="checkbox" id="rememberMeCheckbox" checked>
+                        <label for="rememberMeCheckbox">Remember me</label>
+                    </div>
+                    <a href="/forgotpwd">I forgot my password!</a>
+                </div>
+                <button type="submit">Sign In</button>
+            </form>
+            <div class="login-card-footer">
+                Don't have an account? <a href="/register">Create an account.</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

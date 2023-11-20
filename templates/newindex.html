@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block head %}
+<script> {{ script | safe }} </script>
+<script>
+    function toggleTrack(self_id, map_id, track_id) {
+      var checkbox = document.getElementById(self_id);
+      if (checkbox.checked) {
+        document.getElementById("map").contentWindow[track_id].addTo(document.getElementById("map").contentWindow[map_id]);
+      } else {
+        document.getElementById("map").contentWindow[track_id].remove();
+      }
+    }
+
+    function goToPoint(map_id, lat, lon, point_index) {
+        document.getElementById("map").contentWindow[map_id].flyTo([lat, lon], 14);
+    }
+</script>
+{% endblock %}
+
+{% block content %}
+
+<div class="row flex-xl-nowrap content" style="overflow: scroll !important; height: calc(100vh - 60px);">
+    <div class="col-12">
+        <div class="row flex-xl-nowrap content" style="height: 60vh;">
+            <div class="col-8" style="background-color:azure; padding: 0;">
+                <!-- <h1> Welcome to the new index page! </h1> -->
+                {{ map | safe }}
+                {{ test | safe }}
+            </div>
+            <div class="col-4" style="background-color: violet">
+                <div class="row" style="height:30vh">
+                    1-75 graph 
+                </div>
+                <div class="row" style="height:30vh; background-color: coral">
+                    76-150 graph
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-4" style="display:flex; height: 5vh; background-color: brown;">
+                <span style="text-align: left">Distance: 0 km</span>
+            </div>
+            <div class="col-5" style="background-color:yellowgreen"></div>
+            <div class="col-3" style="align-items: center;background-color:red">
+                <span class="float-left">Time: 0 h 0 min</span>
+                <button type="button" class="btn btn-primary float-right" onclick="myFunction()">Recalculate</button>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12" style="overflow-x: scroll; height: 35vh; width:100vw; background-color: #343a40">
+                <table class="table table-sm table-dark">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            {% for distance_th in distances %}
+                                {{ distance_th | safe }}
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for times in table_avg %}
+                        <tr>
+                            <th scope="row">1</th>
+                            {% for time in times %}
+                                <td>{{ time }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <table class="table table-sm table-dark">
+                    <thead>
+                        <tr>
+                            <th scope="col">#</th>
+                            {% for distance_th in distances %}
+                                {{ distance_th | safe }}
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for times in table_user %}
+                        <tr>
+                            {{ times[0] | safe }}
+                            {% for time in times[1:]: %}
+                                <td>{{ time }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
