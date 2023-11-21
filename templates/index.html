@@ -3,28 +3,23 @@
 {% endblock %}
 {% block content %}
 <div class="row flex-xl-nowrap content" style="height:auto">
-    {% if not graph %}
+    {% if not graph1 %}
     <div class="col-2">
-        <form> 
-            <p> Data from year(s): </p>
-            {% for year in [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2022] %}
-                <div class="form-check form-check-inline">
-                    <input class="form-check-input" type="checkbox" id="check{{year}}" value="option{{year}}">
-                    <label class="form-check-label" for="inlineCheckbox{{year}}">{{year}}</label>
-                </div>
+        <ul class="list-group">
+            {% for filename in filenames %}
+                <li class="list-group-item"><a href="{{ url_for('index', filename=filename) }}">{{ filename }}</a></li>
             {% endfor %}
-            
-        </form>
+        </ul>
     </div>
     <div class="col-10" style="padding-right: 0px;padding-bottom: 0px;">
     {% else %}
-    <div class="col-8" style="padding-right: 0px;padding-bottom: 0px;">
-    <img src="data:image/png;base64,{{graph}}" alt="graph" style="width:100%;height:100%;">
-    </div>
     <div class="col-4" style="padding-right: 0px;padding-bottom: 0px;">
+    <img src="data:image/png;base64,{{graph1}}" alt="graph" style="width:100%;height:30%;">
+    <img src="data:image/png;base64,{{graph2}}" alt="graph" style="width:100%;height:30%;">    
+    </div>
+    <div class="col-8" style="padding-right: 0px;padding-bottom: 0px;">
     {% endif %}
         {{ map | safe}}
-        <!-- <iframe class="map" src="/map" style="width:100%;height:100%;border:0px"></iframe> -->
     </div>
 </div>
 {% endblock %}
