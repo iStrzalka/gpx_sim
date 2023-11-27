@@ -1,7 +1,10 @@
 # https://pl.wikipedia.org/wiki/Układ_współrzędnych_2000
-EPSG_CODE = 2178 # Warsaw
+# EPSG_CODE = 2178 # Warsaw
 # https://pl.wikipedia.org/wiki/Układ_współrzędnych_1992
 # EPSG_CODE = 2180 # Lemko
+MIN_EPSG = 2776
+MAX_EPSG = 2780
+
 
 MIN_POL = 2176
 MAX_POL = 2180
@@ -16,6 +19,11 @@ from pyproj import Proj
 from math import pi, cos, floor
 import os, re
 from gpxpy import parse
+import pandas as pd
+import matplotlib.pyplot as plt
+import io, base64
+import numpy as np
+import haversine
 
 R_EARTH = 6378137
 
@@ -23,7 +31,7 @@ FAILURE = 0
 SUCCESS = 1
 
 
-def test_against_location(xll, yll):
+def test_against_location(xll : int, yll : int) -> int:
     for i in range(MIN_POL, MAX_POL + 1):
         lat, lon = convert_xll_to_latlon(xll, yll, i)
         if lat > MIN_LAT and lat < MAX_LAT and lon > MIN_LON and lon < MAX_LON:
@@ -31,14 +39,14 @@ def test_against_location(xll, yll):
     return None
 
 
-def convert_xll_to_latlon(xll, yll, epsg_code = EPSG_CODE):
+def convert_xll_to_latlon(xll, yll, epsg_code):
     projection = Proj(f'epsg:{epsg_code}')
     lon, lat = projection(xll, yll, inverse=True)
     return lat, lon
 
 
-def convert_latlon_to_xll(lat, lon):
-    projection = Proj(f'epsg:{EPSG_CODE}')
+def convert_latlon_to_xll(lat, lon, epsg_code):
+    projection = Proj(f'epsg:{epsg_code}')
     xll, yll = projection(lon, lat)
     return xll, yll
 
@@ -61,6 +69,8 @@ def database_covers(database_path):
                 nrows = int(lines[1].split(' ')[-1])
                 xllcenter = int(floor(float(lines[2].split(' ')[-1])))
                 yllcenter = int(floor(float(lines[3].split(' ')[-1])))
+
+                epsg_code = test_against_location(xllcenter, yllcenter)
 
                 ret.append(((xllcenter, yllcenter), (xllcenter + ncols - 1, yllcenter + nrows - 1), database_path + file_name))
 
@@ -92,7 +102,7 @@ def parse_gpx_to_points(file_name):
     return points
 
 
-def create_new_gpx(file_name, new_elevations):
+def create_new_gpx(file_name, new_elevations, new_file_name):
     gpx = parse(open(file_name, 'r'))
 
     for track in gpx.tracks:
@@ -100,7 +110,7 @@ def create_new_gpx(file_name, new_elevations):
             for point, elevation in zip(segment.points, new_elevations):
                 point.elevation = elevation
 
-    with open('out.gpx', 'w') as output:
+    with open(new_file_name, 'w') as output:
         output.write(gpx.to_xml())
 
 cur_node = ((-1, -1), (-1, -1), [])
@@ -108,9 +118,11 @@ cur_node = ((-1, -1), (-1, -1), [])
 def find_new_node(dataset, x, y):
     for node in dataset:
         (x1, y1), (x2, y2), _ = node
-        if x1 <= x <= x2 and y1 <= y <= y2:
-            data = get_data(node[2])
-            return (SUCCESS, ((x1, y1), (x2, y2), data))
+        for i in range(MIN_EPSG, MAX_EPSG + 1):
+            xll, yll = convert_latlon_to_xll(x, y, i)
+            if x1 <= xll <= x2 and y1 <= yll <= y2:
+                data = get_data(node[2])
+                return (SUCCESS, ((x1, y1), (x2, y2), data))
     return (FAILURE, f"Node for ({x}, {y}) not found in dataset.")
 
 
@@ -122,14 +134,15 @@ def find_elevation(dataset, lat, lon):
     try:
         (x1, y1), (x2, y2), data = cur_node
     except:
-        (result, cur_node) = find_new_node(dataset, x, y)
+        (result, cur_node) = find_new_node(dataset, lat, lon)
         if result == FAILURE:
             return (FAILURE, cur_node)
         (x1, y1), (x2, y2), data = cur_node
+    
     if x1 <= x <= x2 and y1 <= y <= y2:
         return (SUCCESS, data[y2 - y][x - x1])
     else:
-        (result, cur_node) = find_new_node(dataset, x, y)
+        (result, cur_node) = find_new_node(dataset, lat, lon)
         if result == FAILURE:
             return (FAILURE, cur_node)
         (x1, _), (_, y2), data = cur_node
@@ -144,3 +157,119 @@ def get_elevation_for_points(dataset, points):
             return (FAILURE, (lat, lon))
         ret.append(elevation)
     return (SUCCESS, ret)
+
+
+def cut_data_to_threshold(data, threshold):
+    result = [data[0]]
+    temp = 0
+    for i in range(1, len(data)):
+        temp += data[i][1] - data[i - 1][1]
+        if temp > threshold or temp < -threshold:
+            result.append(data[i])
+            temp = 0
+    result.append(data[-1])
+
+    return result
+
+
+def directional_change(data, d=0.015):     
+    p = pd.DataFrame({
+    "Price": data
+    })
+    p["Event"] = ''
+    run = "upward" # initial run
+    ph = p['Price'][0] # highest price
+    pl = ph # lowest price
+    pl_i = ph_i = 0
+
+    for t in range(0, len(p)):
+        pt = p["Price"][t]
+        if run == "downward":
+            if pt < pl:
+                pl = pt
+                pl_i = t
+            if pt >= pl * (1 + d):
+                p.at[pl_i, 'Event'] = "start upturn event"
+                run = "upward"
+                ph = pt
+                ph_i = t
+                print(">> {} - Upward! : {}%, value {}".format(pl_i, round((pt - pl)/pl, 2), round(pt - pl,2)))
+        elif run == "upward":
+            if pt > ph:
+                ph = pt
+                ph_i = t
+            if pt <= ph * (1 - d):
+                p.at[ph_i, 'Event'] = "start downturn event"
+                run = "downward"
+                pl = pt
+                pl_i = t
+                print(">> {} - Downward! : {}%, value {}".format(ph_i, round((ph - pt)/ph, 2), round(ph - pt,2)))
+    
+    ids_change = p[p['Event'] != ''].index.tolist()
+
+    return p, ids_change
+
+
+def plot_directional_change(data, d=0.015, cutoff = 0.2):
+    original_data = data
+    if cutoff != 0:
+        data = cut_data_to_threshold(data, cutoff)
+    _, ids_change = directional_change([ele for _, ele in data], d)
+
+    plt.figure(figsize=(16, 8))
+    
+    last_id = 0
+    green = True
+    for i in ids_change:
+        X, Y = list(range(last_id, data[i][0] + 1)), [y for _, y in original_data[last_id:data[i][0] + 1]]
+        if green:
+            plt.plot(X, Y, color='green')
+        else:
+            plt.plot(X, Y, color='red')
+        green = not green
+        last_id = data[i][0]
+
+    iobytes = io.BytesIO()
+    plt.savefig(iobytes, format='png')
+    iobytes.seek(0)
+    graph = base64.b64encode(iobytes.read()).decode('utf-8')
+    plt.close()
+
+    return graph, [data[i][0] for i in ids_change]
+
+
+def calculate_distance(point1, point2):
+    return haversine.haversine(point1, point2)
+
+
+
+def table(original_data, ids_change, cutoff = 0.2):
+    cut_data = cut_data_to_threshold(original_data, cutoff)
+    y = [0 for i in range(len(original_data))]
+    for i in range(1, len(cut_data)):
+        y[cut_data[i][0]] = cut_data[i][1] - cut_data[i - 1][1]
+    
+    y = np.array(y)
+    y_up = np.cumsum((y >= 0) * y)
+    y_down = np.cumsum((y < 0) * y)
+
+    llist = []
+    last_id = 0
+    for i in ids_change:
+        llist.append([last_id, i, y_up[i] - y_up[last_id], y_down[i] - y_down[last_id]])
+        last_id = i
+    llist.append([last_id, len(y) - 1, y_up[-1] - y_up[last_id], y_down[-1] - y_down[last_id]])
+
+    return pd.DataFrame(llist, columns=['start', 'end', 'elevation_gain', 'elevation_loss'])
+
+
+def convert(dataset, gpx_file, converted_file):
+    df = database_covers(dataset)
+    points = parse_gpx_to_points(gpx_file)
+    result, elevation_map = get_elevation_for_points(df, points)
+
+    if result is FAILURE:
+        return FAILURE, elevation_map
+
+    create_new_gpx(gpx_file, elevation_map, converted_file)
+

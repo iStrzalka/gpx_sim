@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block head %}
+{% endblock %}
+{% block content %}
+<div class="row flex-xl-nowrap content" style="height:auto">
+    {% if not graph1 %}
+    <div class="col-2">
+        <ul class="list-group">
+            {% for filename in filenames %}
+                <li class="list-group-item"><a href="{{ url_for('peek', filename=filename) }}">{{ filename }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+    <div class="col-10" style="padding-right: 0px;padding-bottom: 0px;">
+    {% else %}
+    <div class="col-4" style="padding-right: 0px;padding-bottom: 0px;">
+    {{ table | safe }}
+    <img src="data:image/png;base64,{{graph1}}" alt="graph" style="width:100%;height:30%;">
+    <img src="data:image/png;base64,{{graph2}}" alt="graph" style="width:100%;height:30%;">    
+    </div>
+    <div class="col-8" style="padding-right: 0px;padding-bottom: 0px;">
+    {% endif %}
+        {{ map | safe}}
+    </div>
+</div>
+{% endblock %}
