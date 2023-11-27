@@ -1,7 +1,7 @@
 # https://pl.wikipedia.org/wiki/Układ_współrzędnych_2000
-# EPSG_CODE = 2178 # Warsaw
+EPSG_CODE = 2178 # Warsaw
 # https://pl.wikipedia.org/wiki/Układ_współrzędnych_1992
-EPSG_CODE = 2180 # Lemko
+# EPSG_CODE = 2180 # Lemko
 
 MIN_POL = 2176
 MAX_POL = 2180
