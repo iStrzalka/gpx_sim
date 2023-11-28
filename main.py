@@ -124,9 +124,27 @@ def database_covers_map(database_path):
     
     return ret
 
-def get_plot_and_breakpoints(filename):
-    elevation_points = parse_gpx_to_points(filename)
-    plot, ids_change = plot_directional_change([(i, ele) for i, (_, ele) in enumerate(elevation_points)], 0.015)
+def get_plot_and_breakpoints(filename, a = None, b = None):
+    # _, points2 = process_gpx_to_df(filename)
+    points = parse_gpx_to_points(filename)
+    # print([(x, y) for x, y in zip(points, points2)][:5])
+    print(points[0])
+    if a:
+        points = points[a:b]
+    x = [0]
+    for i in range(1, len(points)):
+        point1 = (points[i - 1][0][1], points[i - 1][0][0])
+        point2 = (points[i][0][1], points[i][0][0])
+        # if point1 == points2[i - 1]:
+        #     print('ok')
+        # else:
+        #     print(point1, point2)
+        #     return
+        x.append(calculate_distance(point1, point2))
+    x = np.cumsum(x)
+    x = [round(ele, 2) for ele in x]
+    print(x)
+    plot, ids_change = plot_directional_change([(i, ele) for i, (_, ele) in enumerate(points)], 0.015, x)
 
     return (SUCCESS, (plot, ids_change))
 
@@ -203,11 +221,18 @@ def index(filename, a, b):
         # for (lat, lon), (lat2, lon2) in data:
         #     folium.Rectangle(bounds=[(lat, lon), (lat2, lon2)], color='blue', fill=True, fill_opacity=0.2).add_to(mymap)
 
+        x = [0]
+        for i in range(1, len(points)):
+            x.append(calculate_distance(points[i - 1], points[i]))
+        x = np.cumsum(x)
+        print(x[-1], 'km')
+        print(len(points))
+
         # map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
         filenames = list(sorted(os.listdir(GPXDATA)))
         elevation_points = parse_gpx_to_points(GPXDATA + filename)
-
-        result, data = get_plot_and_breakpoints(GPXDATA + filename)
+        elevation_points = elevation_points[a:b]
+        result, data = get_plot_and_breakpoints(GPXDATA + filename, a, b)
         ele = [(i, ele) for i, (_, ele) in enumerate(elevation_points)]
         
         # cutoff_x = [x for x, y in cut_data_to_threshold(ele, 0.2)]
@@ -223,32 +248,37 @@ def index(filename, a, b):
         
         g2 = table(ele, data[1])
         
-        x = [0]
-        for i in range(1, len(points)):
-            x.append(calculate_distance(points[i - 1], points[i]))
-        x = np.cumsum(x)
+        
 
         diff = 0
-        DIFFERENCE = 0.1 # 0.1km
-        for i in range(1, len(x)):
+        DIFFERENCE = 0.5 # 0.1km
+        for i in range(a + 1, b + 1):
             diff += x[i] - x[i - 1]
             if diff > DIFFERENCE:
                 icon_circle = BeautifyIcon(
                     icon_shape='circle-dot', 
                     border_color='blue', 
                     border_width=6,
+                    inner_icon_style='opacity:0.3'
                 )
-                folium.Marker(location=points[i], tooltip=f'circle {i}', icon=icon_circle).add_to(mymap)
-                diff = 0
+                folium.Marker(location=points[i], tooltip=f'point {round(x[i] - x[a], 2)}km', icon=icon_circle).add_to(mymap)
+                diff -= DIFFERENCE
                 # popup = folium.Popup("Elevation change {}".format(i), max_width=400)
                 # folium.Marker(location=points[i], popup=popup, tooltip=f'Point {i}', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:10px;height:10px;border-radius:5px;background:blue;opacity:0.75"></div>')).add_to(mymap)
         
-
+        g2['start_id'] = g2['start']
+        g2['end_id'] = g2['end']
         g2['start'] = g2['start'].apply(lambda a: str(round(x[a], 2)) + ' km')
         g2['end'] = g2['end'].apply(lambda a: str(round(x[a], 2)) + ' km')
+        g2['elevation_gain'] = g2['elevation_gain'].apply(lambda a: str(round(a, 2)) + ' m')
+        g2['elevation_loss'] = g2['elevation_loss'].apply(lambda a: str(round(a, 2)) + ' m')
+
+        # dataframe to list
+        tab = g2.to_numpy().tolist()
 
         green = True
         last_i = 0
+        points = points[a:b]
         for i in data[1] + [len(ele)]:
             if green:
                 folium.PolyLine(points[last_i:i + 1], color="green", weight=2.5, opacity=1).add_to(mymap)
@@ -259,8 +289,15 @@ def index(filename, a, b):
         map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
         # folium.PolyLine(points, color="blue", weight=2.5, opacity=1).add_to(mymap)
 
+        # print(g2.to_html())
+        # table_html = g2.to_html()
+        # table_html = table_html.replace('$', '</a>')
+        # table_html = table_html.replace('#', '>')
+        # table_html = table_html.replace('a href=', '<a href=')
+        # print(table_html)
+
         if result is SUCCESS:
-            return render_template('index.html', graph1=data[0], table=g2.to_html(), map=map_html, filenames=filenames)
+            return render_template('index.html', graph1=data[0], table=tab, map=map_html, filename=filename, filenames=filenames)
         else:
             return render_template('index.html', map=map_html, filenames=filenames)
     else:
@@ -276,4 +313,4 @@ def index(filename, a, b):
         return render_template('index.html', map=map_html, filenames=filenames)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5001)

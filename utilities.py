@@ -210,7 +210,7 @@ def directional_change(data, d=0.015):
     return p, ids_change
 
 
-def plot_directional_change(data, d=0.015, cutoff = 0.2):
+def plot_directional_change(data, d=0.015, distances = [], cutoff = 0.2):
     original_data = data
     if cutoff != 0:
         data = cut_data_to_threshold(data, cutoff)
@@ -218,16 +218,29 @@ def plot_directional_change(data, d=0.015, cutoff = 0.2):
 
     plt.figure(figsize=(16, 8))
     
+    # print(original_data[:5])
+    # distances = [0]
+    # for i in range(1, len(original_data)):
+    #     distances.append(calculate_distance(original_data[i - 1], original_data[i]))
+    # distances = np.cumsum(distances)
+
     last_id = 0
     green = True
     for i in ids_change:
-        X, Y = list(range(last_id, data[i][0] + 1)), [y for _, y in original_data[last_id:data[i][0] + 1]]
+        X, Y = distances[last_id:data[i][0] + 1], [y for _, y in original_data[last_id:data[i][0] + 1]]
         if green:
             plt.plot(X, Y, color='green')
         else:
             plt.plot(X, Y, color='red')
         green = not green
         last_id = data[i][0]
+    X, Y = distances[last_id:], [y for _, y in original_data[last_id:]]
+    if green:
+        plt.plot(X, Y, color='green')
+    else:
+        plt.plot(X, Y, color='red')
+    
+    plt.xticks(np.arange(0, max(distances), 0.5))
 
     iobytes = io.BytesIO()
     plt.savefig(iobytes, format='png')
