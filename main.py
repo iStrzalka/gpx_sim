@@ -125,9 +125,7 @@ def database_covers_map(database_path):
     return ret
 
 def get_plot_and_breakpoints(filename, a = None, b = None):
-    # _, points2 = process_gpx_to_df(filename)
     points = parse_gpx_to_points(filename)
-    # print([(x, y) for x, y in zip(points, points2)][:5])
     print(points[0])
     if a:
         points = points[a:b]
@@ -135,11 +133,6 @@ def get_plot_and_breakpoints(filename, a = None, b = None):
     for i in range(1, len(points)):
         point1 = (points[i - 1][0][1], points[i - 1][0][0])
         point2 = (points[i][0][1], points[i][0][0])
-        # if point1 == points2[i - 1]:
-        #     print('ok')
-        # else:
-        #     print(point1, point2)
-        #     return
         x.append(calculate_distance(point1, point2))
     x = np.cumsum(x)
     x = [round(ele, 2) for ele in x]
@@ -250,22 +243,32 @@ def index(filename, a, b):
         
         
 
-        diff = 0
-        DIFFERENCE = 0.5 # 0.1km
-        for i in range(a + 1, b + 1):
-            diff += x[i] - x[i - 1]
-            if diff > DIFFERENCE:
-                icon_circle = BeautifyIcon(
-                    icon_shape='circle-dot', 
-                    border_color='blue', 
-                    border_width=6,
-                    inner_icon_style='opacity:0.3'
-                )
-                folium.Marker(location=points[i], tooltip=f'point {round(x[i] - x[a], 2)}km', icon=icon_circle).add_to(mymap)
-                diff -= DIFFERENCE
+        # diff = 0
+        # DIFFERENCE = 0.5 # 0.1km
+        # for i in range(a + 1, b + 1):
+        #     diff += x[i] - x[i - 1]
+        #     if diff > DIFFERENCE:
+        #         icon_circle = BeautifyIcon(
+        #             icon_shape='circle-dot', 
+        #             border_color='blue', 
+        #             border_width=6,
+        #             inner_icon_style='opacity:0.3'
+        #         )
+        #         folium.Marker(location=points[i], tooltip=f'point {round(x[i] - x[a], 2)}km', icon=icon_circle).add_to(mymap)
+        #         diff -= DIFFERENCE
                 # popup = folium.Popup("Elevation change {}".format(i), max_width=400)
                 # folium.Marker(location=points[i], popup=popup, tooltip=f'Point {i}', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:10px;height:10px;border-radius:5px;background:blue;opacity:0.75"></div>')).add_to(mymap)
         
+        for index in data[1]:
+            icon_circle = BeautifyIcon(
+                icon_shape='circle-dot', 
+                border_color='blue', 
+                border_width=6,
+                inner_icon_style='opacity:0.3'
+            )
+            folium.Marker(location=points[index + a], tooltip=f'Point {round(x[index], 2)}km', icon=icon_circle).add_to(mymap)
+
+
         g2['start_id'] = g2['start']
         g2['end_id'] = g2['end']
         g2['start'] = g2['start'].apply(lambda a: str(round(x[a], 2)) + ' km')
@@ -286,6 +289,51 @@ def index(filename, a, b):
                 folium.PolyLine(points[last_i:i + 1], color="red", weight=2.5, opacity=1).add_to(mymap)
             green = not green
             last_i = i
+
+        # folium.PolyLine(locations=[(52.23502,21.18470), (52.229255, 21.186420)], color="black", opacity=1).add_to(mymap)
+
+        # def calculate_line_slope(line):
+        #     (x1, y1), (x2, y2) = line
+        #     return (y2 - y1) / (x2 - x1)
+
+        # def calculate_line_intercept(line):
+        #     (x1, y1), (x2, y2) = line
+        #     return y1 - calculate_line_slope(line) * x1
+
+        # def calculate_line_y(line, x):
+        #     return calculate_line_slope(line) * x + calculate_line_intercept(line)
+
+        # line = [(52.23502,21.18470), (52.229255, 21.186420)]
+        # converted_line = [convert_latlon_to_xll(lat, lon) for (lat, lon) in line]
+
+        # tab_ = []
+        # for x in range(converted_line[0][0], converted_line[1][0] + 1):
+        #     y = int(calculate_line_y(converted_line, x))
+        #     (lat, lon) = convert_xll_to_latlon(x, y)
+        #     folium.CircleMarker(location=[lat, lon], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
+
+        # print(points[:5])
+        # converted_file = [convert_latlon_to_xll(lat, lon) for (lon, lat) in points]
+        # converted_file = [convert_xll_to_latlon(x, y) for x, y in converted_file]
+        # for (x, y) in converted_file:
+        #     folium.CircleMarker(location=[y, x], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
+
+        # Compare segment /1.gpx to current segment
+        _, segment_points = process_gpx_to_df(GPXDATA + '/1.gpx') 
+        print(segment_points[2090:2332])
+        print(convert_latlon_to_xll(segment_points[2090][0], segment_points[2090][1]))
+
+        llist = find_points_for_segment([convert_latlon_to_xll(lat, lon) for (lat, lon) in segment_points[2090:2332]], points)
+        print(len(llist))
+
+        for (x, y) in segment_points[2090:2332]:
+            folium.CircleMarker(location=[x, y], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
+
+        for i, track in enumerate(llist):
+            track_points = [points[i] for i in track]
+            track_color = colors[2 + i]
+            folium.PolyLine(track_points, color=track_color, weight=2.5, opacity=1).add_to(mymap)
+
         map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
         # folium.PolyLine(points, color="blue", weight=2.5, opacity=1).add_to(mymap)
 
@@ -297,7 +345,7 @@ def index(filename, a, b):
         # print(table_html)
 
         if result is SUCCESS:
-            return render_template('index.html', graph1=data[0], table=tab, map=map_html, filename=filename, filenames=filenames)
+            return render_template('index.html', graph1=data[0], table=tab, map=map_html, filename=filename, filenames=filenames, a=a)
         else:
             return render_template('index.html', map=map_html, filenames=filenames)
     else:

@@ -2,8 +2,8 @@
 # EPSG_CODE = 2178 # Warsaw
 # https://pl.wikipedia.org/wiki/Układ_współrzędnych_1992
 # EPSG_CODE = 2180 # Lemko
-MIN_EPSG = 2776
-MAX_EPSG = 2780
+MIN_EPSG = 2176
+MAX_EPSG = 2180
 
 
 MIN_POL = 2176
@@ -16,7 +16,7 @@ MIN_LON = 14.24712
 MAX_LON = 23.89251
 
 from pyproj import Proj
-from math import pi, cos, floor
+from math import pi, cos, floor, sqrt
 import os, re
 from gpxpy import parse
 import pandas as pd
@@ -39,16 +39,16 @@ def test_against_location(xll : int, yll : int) -> int:
     return None
 
 
-def convert_xll_to_latlon(xll, yll, epsg_code):
+def convert_xll_to_latlon(xll, yll, epsg_code = 2178):
     projection = Proj(f'epsg:{epsg_code}')
     lon, lat = projection(xll, yll, inverse=True)
     return lat, lon
 
 
-def convert_latlon_to_xll(lat, lon, epsg_code):
+def convert_latlon_to_xll(lat, lon, epsg_code = 2178):
     projection = Proj(f'epsg:{epsg_code}')
     xll, yll = projection(lon, lat)
-    return xll, yll
+    return int(xll), int(yll)
 
 
 def add_to_lattitude(lat, lon, dy, dx):
@@ -271,7 +271,7 @@ def table(original_data, ids_change, cutoff = 0.2):
     for i in ids_change:
         llist.append([last_id, i, y_up[i] - y_up[last_id], y_down[i] - y_down[last_id]])
         last_id = i
-    llist.append([last_id, len(y) - 1, y_up[-1] - y_up[last_id], y_down[-1] - y_down[last_id]])
+    llist.append([last_id, len(y), y_up[-1] - y_up[last_id], y_down[-1] - y_down[last_id]])
 
     return pd.DataFrame(llist, columns=['start', 'end', 'elevation_gain', 'elevation_loss'])
 
@@ -286,3 +286,66 @@ def convert(dataset, gpx_file, converted_file):
 
     create_new_gpx(gpx_file, elevation_map, converted_file)
 
+
+def find_points_for_segment(segment, points):
+    HOW_MANY = 10
+    DISTANCE_THRESHOLD_METERS = 7
+    INDEX_THRESHOLD = 3
+
+    def distance_point(point, point2):
+        (x1, y1), (x2, y2) = point, point2
+        return sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+    converted = [convert_latlon_to_xll(lat, lon) for (lat, lon) in points]
+
+    index_tab = []
+    for point in segment:
+        distances = [(distance_point(point, point2), i) for i, point2 in enumerate(converted)]
+        distances.sort()
+        # cut to 3meters distance
+        distances = [(d, i) for d, i in distances if d < DISTANCE_THRESHOLD_METERS]
+        indexes = [i for _, i in distances[:HOW_MANY]]
+        indexes.sort()
+        index_tab.append(indexes)
+
+    do_not_continue = [[False for _ in range(HOW_MANY)] for _ in range(len(index_tab))]
+
+    def dfs(last, i, dnc):
+        if i == len(index_tab):
+            return (True, [])
+        for j in range(len(index_tab[i])):
+            if do_not_continue[i][j]:
+                continue
+            # print(index_tab[i][j], last)
+            if 0 <= index_tab[i][j] - last and index_tab[i][j] - last <= INDEX_THRESHOLD:
+                result, data = dfs(index_tab[i][j], i + 1, (i, j))
+                if result:
+                    return (True, data + [(i, j)]) 
+        
+
+        do_not_continue[dnc[0]][dnc[1]] = True
+        return (False, i)
+
+    found_traces = []
+    for i in range(len(index_tab[0])):
+        result, data = dfs(index_tab[0][i], 1, (0, i))
+        if result:
+            data = [(0, i)] + data[::-1]
+            data = [index_tab[i][j] for i, j in data]
+            found_traces.append(data)
+            #  print(result, data)
+        else:
+            # print(result, data)
+            pass
+
+    # get unique traces that are unique in 95% of points
+    unique_traces = []
+    for trace in found_traces:
+        for trace2 in unique_traces:
+            percentage = sum(trace[i] == trace2[i] for i in range(len(trace))) / len(trace)
+            if percentage > 0.95:
+                break
+        else:
+            unique_traces.append(trace)
+
+    return unique_traces
