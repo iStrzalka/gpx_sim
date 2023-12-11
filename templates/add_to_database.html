@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="position:relative; height:200px; border: 3px solid green">
+    <div style="position:absolute; top: 50%; left:50%; -ms-transform:translateY(-50%);transform: translateY(-50%);">
+        <form action="{{ url_for('add_to_database') }}" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="exampleFormControlFile1">Example file input</label>
+                <input type="file" class="form-control-file" id="exampleFormControlFile1" name="file" multiple>
+                <input type="submit" value="Upload">
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

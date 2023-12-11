@@ -30,8 +30,17 @@ R_EARTH = 6378137
 FAILURE = 0
 SUCCESS = 1
 
+converters = {
+    2176: Proj(f'epsg:2176'),
+    2177: Proj(f'epsg:2177'),
+    2178: Proj(f'epsg:2178'),
+    2179: Proj(f'epsg:2179'),
+    2180: Proj(f'epsg:2180'),
+}
 
-def test_against_location(xll : int, yll : int) -> int:
+
+# Testing xll, yll against all EPSG codes in Poland (2176 - 2180)
+def test_against_location(xll, yll):
     for i in range(MIN_POL, MAX_POL + 1):
         lat, lon = convert_xll_to_latlon(xll, yll, i)
         if lat > MIN_LAT and lat < MAX_LAT and lon > MIN_LON and lon < MAX_LON:
@@ -39,18 +48,19 @@ def test_against_location(xll : int, yll : int) -> int:
     return None
 
 
+# Converts xll, yll values to lattitude and longitude values using EPSG code
 def convert_xll_to_latlon(xll, yll, epsg_code = 2178):
-    projection = Proj(f'epsg:{epsg_code}')
-    lon, lat = projection(xll, yll, inverse=True)
+    lon, lat = converters[epsg_code](xll, yll, inverse=True)
     return lat, lon
 
 
+# Converts lattitude and longitude values to xll, yll values using EPSG code
 def convert_latlon_to_xll(lat, lon, epsg_code = 2178):
-    projection = Proj(f'epsg:{epsg_code}')
-    xll, yll = projection(lon, lat)
+    xll, yll = converters[epsg_code](lon, lat)
     return int(xll), int(yll)
 
 
+# Adds dy and dx to lattitude and longitude values and returns new values
 def add_to_lattitude(lat, lon, dy, dx):
     new_lat = lat + (dy / R_EARTH) * (180 / pi)
     new_lon = lon + (dx / R_EARTH) * (180 / pi) / cos(lat * pi/180)
@@ -58,6 +68,8 @@ def add_to_lattitude(lat, lon, dy, dx):
     return new_lat, new_lon
 
 
+# Given database path, returns what the database covers in xll, yll values
+# with the path to the file as well as its EPSG code [TODO] 
 def database_covers(database_path):
     ret = []
 
@@ -77,6 +89,7 @@ def database_covers(database_path):
     return ret
 
 
+# Given path to file, returns its estimated elevation data
 def get_data(file_name):
     data = []
     with open(file_name, 'r') as input:    
@@ -90,6 +103,7 @@ def get_data(file_name):
     return data
 
 
+# Given path to gpx file, return list of points in format ((lon, lat), elevation)
 def parse_gpx_to_points(file_name):
     gpx = parse(open(file_name, 'r'))
 
@@ -102,6 +116,7 @@ def parse_gpx_to_points(file_name):
     return points
 
 
+# Given path to gpx file as well as new elevations, creates new gpx file with new elevations.
 def create_new_gpx(file_name, new_elevations, new_file_name):
     gpx = parse(open(file_name, 'r'))
 
@@ -115,6 +130,9 @@ def create_new_gpx(file_name, new_elevations, new_file_name):
 
 cur_node = ((-1, -1), (-1, -1), [])
 
+
+# Given dataset and xll, yll values finds new database file that contains those values
+# returns it in format ((xll1, yll1), (xll2, yll2), data)
 def find_new_node(dataset, x, y):
     for node in dataset:
         (x1, y1), (x2, y2), _ = node
@@ -126,6 +144,7 @@ def find_new_node(dataset, x, y):
     return (FAILURE, f"Node for ({x}, {y}) not found in dataset.")
 
 
+# Given dataset and lattitude and longitude values, returns elevation for those values
 def find_elevation(dataset, lat, lon):
     x, y = convert_latlon_to_xll(lat, lon)
     x, y = int(round(x, 1)), int(round(y, 1))
@@ -149,6 +168,7 @@ def find_elevation(dataset, lat, lon):
         return (SUCCESS, data[y2 - y][x - x1])
     
 
+# Given dataset and list of points, returns list of elevations for those points
 def get_elevation_for_points(dataset, points):
     ret = []
     for (lon, lat), _ in points:
@@ -159,6 +179,7 @@ def get_elevation_for_points(dataset, points):
     return (SUCCESS, ret)
 
 
+# Given dataset and list of points, cut elevation change to threshold
 def cut_data_to_threshold(data, threshold):
     result = [data[0]]
     temp = 0
@@ -172,6 +193,7 @@ def cut_data_to_threshold(data, threshold):
     return result
 
 
+# Given data find directional change based on trading algorithm
 def directional_change(data, d=0.015):     
     p = pd.DataFrame({
     "Price": data
@@ -193,7 +215,7 @@ def directional_change(data, d=0.015):
                 run = "upward"
                 ph = pt
                 ph_i = t
-                print(">> {} - Upward! : {}%, value {}".format(pl_i, round((pt - pl)/pl, 2), round(pt - pl,2)))
+                # print(">> {} - Upward! : {}%, value {}".format(pl_i, round((pt - pl)/pl, 2), round(pt - pl,2)))
         elif run == "upward":
             if pt > ph:
                 ph = pt
@@ -203,13 +225,14 @@ def directional_change(data, d=0.015):
                 run = "downward"
                 pl = pt
                 pl_i = t
-                print(">> {} - Downward! : {}%, value {}".format(ph_i, round((ph - pt)/ph, 2), round(ph - pt,2)))
+                # print(">> {} - Downward! : {}%, value {}".format(ph_i, round((ph - pt)/ph, 2), round(ph - pt,2)))
     
     ids_change = p[p['Event'] != ''].index.tolist()
 
     return p, ids_change
 
 
+# Perform cutoff on data and plot directional change and return as base64
 def plot_directional_change(data, d=0.015, distances = [], cutoff = 0.2):
     original_data = data
     if cutoff != 0:
@@ -251,11 +274,12 @@ def plot_directional_change(data, d=0.015, distances = [], cutoff = 0.2):
     return graph, [data[i][0] for i in ids_change]
 
 
+# Calculate distance between two points
 def calculate_distance(point1, point2):
     return haversine.haversine(point1, point2)
 
 
-
+# Given original data, ids of change, and cutoff, return table of elevation gain and loss
 def table(original_data, ids_change, cutoff = 0.2):
     cut_data = cut_data_to_threshold(original_data, cutoff)
     y = [0 for i in range(len(original_data))]
@@ -287,10 +311,13 @@ def convert(dataset, gpx_file, converted_file):
     create_new_gpx(gpx_file, elevation_map, converted_file)
 
 
+# Given segment in (xll, yll) format and list of points in (lat, lon) format
+# returns list of traces that match the segment with at least [PERCENTAGE]% accuracy
 def find_points_for_segment(segment, points):
     HOW_MANY = 10
     DISTANCE_THRESHOLD_METERS = 7
     INDEX_THRESHOLD = 3
+    PERCENTAGE = 0.95
 
     def distance_point(point, point2):
         (x1, y1), (x2, y2) = point, point2
@@ -343,7 +370,7 @@ def find_points_for_segment(segment, points):
     for trace in found_traces:
         for trace2 in unique_traces:
             percentage = sum(trace[i] == trace2[i] for i in range(len(trace))) / len(trace)
-            if percentage > 0.95:
+            if percentage > PERCENTAGE:
                 break
         else:
             unique_traces.append(trace)

@@ -2,4 +2,8 @@ map_data/
 map_data_2018/
 old/
 __pycache__/
-intance/
+instance/
+static/database/*
+static/temp/*
+*.ipynb
+*.ipynb_checkpoints

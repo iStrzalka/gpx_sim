@@ -11,13 +11,16 @@ import gpxpy
 import matplotlib.pyplot as plt
 import numpy as np
 import io, base64
+from time import time
+import datetime
 
 from folium.plugins import BeautifyIcon
 
 from utilities import *
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'static/uploaded_data'
+app.config['UPLOAD_FOLDER'] = 'static/temp'
+app.config['DATABASE_FOLDER'] = 'static/database'
 
 
 db_name = 'gpx_viewer'
@@ -58,6 +61,81 @@ class Track(db.Model):
         self.file_path = file_path
         self.converted_file_path = converted_file_path
         self.converted = False
+
+
+class MapData(db.Model):
+    __tablename__ = 'map_data'
+    id = db.Column(db.Integer, primary_key=True)
+    file_name = db.Column(db.String(100))
+    added_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    added_date = db.Column(db.DateTime)
+    epsg_code = db.Column(db.Integer)
+    xll = db.Column(db.Integer)
+    yll = db.Column(db.Integer)
+    nrows = db.Column(db.Integer)
+    ncols = db.Column(db.Integer)
+    cellsize = db.Column(db.Integer)
+    
+    def __init__(self, file_name, epsg_code, xll, yll, nrows, ncols, cellsize):
+        self.file_name = file_name
+        self.epsg_code = epsg_code
+        self.xll = xll
+        self.yll = yll
+        self.nrows = nrows
+        self.ncols = ncols
+        self.cellsize = cellsize
+        self.added_date = datetime.datetime.now()
+        self.added_by = None
+
+def is_user_admin():
+    return True
+
+
+def read_database_file(filename):
+    try:
+        with open(os.path.join(app.config['UPLOAD_FOLDER'], filename)) as f:
+            lines = [f.readline().strip() for _ in range(6)]
+            
+            ncols = int(lines[0].split(' ')[-1])
+            nrows = int(lines[1].split(' ')[-1])
+            xllcenter = int(floor(float(lines[2].split(' ')[-1])))
+            yllcenter = int(floor(float(lines[3].split(' ')[-1])))
+            cellsize = int(lines[4].split(' ')[-1])
+            epsg_code = test_against_location(xllcenter, yllcenter)
+            if epsg_code == None:
+                return FAILURE, 'File does not cover Poland'
+            return SUCCESS, (filename, epsg_code, xllcenter, yllcenter, nrows, ncols, cellsize)
+    except Exception as e:
+        return FAILURE, e
+
+
+@app.route('/add_to_database', methods=['POST', 'GET'])
+def add_to_database():
+    # TODO : check if user is admin
+    # TODO : check if file is already in database
+    # TODO : check if file is valid
+    # TODO : check if file is not too big
+    # TODO : if successful, give user feedback
+    if not is_user_admin():
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        f = request.files.getlist('file')
+        for file in f:
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], file.filename))
+            result, data = read_database_file(file.filename)
+            if result == SUCCESS:
+                map_data = MapData(*data)
+                db.session.add(map_data)
+                db.session.commit()
+                os.rename(os.path.join(app.config['UPLOAD_FOLDER'], file.filename), 
+                          os.path.join(app.config['DATABASE_FOLDER'], file.filename))
+            else:
+                flash(data)
+
+        return redirect(url_for('add_to_database'))
+    else:
+        return render_template('add_to_database.html')
 
 
 @app.route('/upload', methods=['POST', 'GET'])
@@ -126,7 +204,7 @@ def database_covers_map(database_path):
 
 def get_plot_and_breakpoints(filename, a = None, b = None):
     points = parse_gpx_to_points(filename)
-    print(points[0])
+    # print(points[0])
     if a:
         points = points[a:b]
     x = [0]
@@ -136,7 +214,7 @@ def get_plot_and_breakpoints(filename, a = None, b = None):
         x.append(calculate_distance(point1, point2))
     x = np.cumsum(x)
     x = [round(ele, 2) for ele in x]
-    print(x)
+    # print(x)
     plot, ids_change = plot_directional_change([(i, ele) for i, (_, ele) in enumerate(points)], 0.015, x)
 
     return (SUCCESS, (plot, ids_change))
@@ -185,6 +263,47 @@ def peek(filename = None):
         return render_template('peek.html', map=map_html, filenames=filenames)
 
 
+@app.route('/compare/<filename>/<start>/<end>')
+def compare(filename, start, end):
+    df, points = process_gpx_to_df(GPXDATA + filename)
+    start = int(start)
+    end = int(end)
+    segment_points = points[start:end]
+
+    mymap = folium.Map(location=[ df[start:end].Latitude.mean(), df[start:end].Longitude.mean() ], zoom_start=15)
+    folium.TileLayer('http://tile.stamen.com/terrain/{z}/{x}/{y}.jpg', attr='terrain-bcg', name='Terrain Map').add_to(mymap)
+
+    html_start = "Start of the track {}".format("Lemko 2018")
+    start_popup = folium.Popup(html_start, max_width=400)
+    end_popup = folium.Popup("End of the track {}".format("Lemko 2018"), max_width=400)
+    
+    folium.Marker(location=segment_points[0], popup=start_popup, tooltip='Start', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:25px;height:25px;border-radius:12.5px;background:green;opacity:0.5"></div>')).add_to(mymap)
+    folium.Marker(location=segment_points[-1], popup=end_popup, tooltip='End', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:25px;height:25px;border-radius:12.5px;background:red;opacity:0.5"></div>')).add_to(mymap)
+
+    folium.PolyLine(segment_points, color="blue", weight=2.5, opacity=1).add_to(mymap)
+
+    tab = []
+    count = 0
+    for file in os.listdir(GPXDATA):
+        if file.endswith('.gpx'):
+            _, points = process_gpx_to_df(GPXDATA + file)
+            
+            start = time()
+            llist = find_points_for_segment([convert_latlon_to_xll(lat, lon) for (lat, lon) in segment_points], points)
+            print(file, len(llist), time() - start)
+            if len(llist) > 0:
+                for j, track in enumerate(llist):
+                    track_points = [points[i] for i in track]
+                    folium.PolyLine(track_points, color=colors[2+count], weight=2.5, opacity=1).add_to(mymap)
+                    tab.append((colors[2+count], file, track[0], track[-1], 'NA'))
+                    count += 1
+    print(tab)
+
+    map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
+    return render_template('compare.html', map=map_html, table=tab)
+
+
+
 @app.route('/', defaults={'filename': None, 'a' : None, 'b' : None}, methods=['GET'])
 @app.route('/<filename>', defaults={'a' : None, 'b' : None}, methods=['GET'])
 @app.route('/<filename>/<a>/<b>', methods=['GET'])
@@ -210,54 +329,20 @@ def index(filename, a, b):
         folium.Marker(location=points[a], popup=start_popup, tooltip='Start', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:25px;height:25px;border-radius:12.5px;background:green;opacity:0.5"></div>')).add_to(mymap)
         folium.Marker(location=points[b], popup=end_popup, tooltip='End', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:25px;height:25px;border-radius:12.5px;background:red;opacity:0.5"></div>')).add_to(mymap)
 
-        # data = database_covers_map(DATASET)
-        # for (lat, lon), (lat2, lon2) in data:
-        #     folium.Rectangle(bounds=[(lat, lon), (lat2, lon2)], color='blue', fill=True, fill_opacity=0.2).add_to(mymap)
-
+        start = time()
         x = [0]
         for i in range(1, len(points)):
             x.append(calculate_distance(points[i - 1], points[i]))
         x = np.cumsum(x)
-        print(x[-1], 'km')
-        print(len(points))
 
-        # map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
         filenames = list(sorted(os.listdir(GPXDATA)))
         elevation_points = parse_gpx_to_points(GPXDATA + filename)
         elevation_points = elevation_points[a:b]
         result, data = get_plot_and_breakpoints(GPXDATA + filename, a, b)
         ele = [(i, ele) for i, (_, ele) in enumerate(elevation_points)]
-        
-        # cutoff_x = [x for x, y in cut_data_to_threshold(ele, 0.2)]
-        # for x in cutoff_x:
-        #     icon_circle = BeautifyIcon(
-        #         icon_shape='circle-dot', 
-        #         border_color='green', 
-        #         border_width=10,
-        #     )
-        #     folium.Marker(location=points[x], tooltip='circle', icon=icon_circle).add_to(mymap)
-        #     # popup = folium.Popup("Elevation change {}".format(x), max_width=400)
-        #     # folium.Marker(location=points[x], popup=popup, tooltip=f'Point {x}', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:10px;height:10px;border-radius:5px;background:blue;opacity:0.75"></div>')).add_to(mymap)
-        
-        g2 = table(ele, data[1])
-        
-        
+        print("Time taken", time() - start)
 
-        # diff = 0
-        # DIFFERENCE = 0.5 # 0.1km
-        # for i in range(a + 1, b + 1):
-        #     diff += x[i] - x[i - 1]
-        #     if diff > DIFFERENCE:
-        #         icon_circle = BeautifyIcon(
-        #             icon_shape='circle-dot', 
-        #             border_color='blue', 
-        #             border_width=6,
-        #             inner_icon_style='opacity:0.3'
-        #         )
-        #         folium.Marker(location=points[i], tooltip=f'point {round(x[i] - x[a], 2)}km', icon=icon_circle).add_to(mymap)
-        #         diff -= DIFFERENCE
-                # popup = folium.Popup("Elevation change {}".format(i), max_width=400)
-                # folium.Marker(location=points[i], popup=popup, tooltip=f'Point {i}', icon=folium.DivIcon(html='<div style="margin-top:-50%;margin-left:-50%;width:10px;height:10px;border-radius:5px;background:blue;opacity:0.75"></div>')).add_to(mymap)
+        g2 = table(ele, data[1])
         
         for index in data[1]:
             icon_circle = BeautifyIcon(
@@ -276,7 +361,7 @@ def index(filename, a, b):
         g2['elevation_gain'] = g2['elevation_gain'].apply(lambda a: str(round(a, 2)) + ' m')
         g2['elevation_loss'] = g2['elevation_loss'].apply(lambda a: str(round(a, 2)) + ' m')
 
-        # dataframe to list
+        # dataframe to list 
         tab = g2.to_numpy().tolist()
 
         green = True
@@ -290,59 +375,22 @@ def index(filename, a, b):
             green = not green
             last_i = i
 
-        # folium.PolyLine(locations=[(52.23502,21.18470), (52.229255, 21.186420)], color="black", opacity=1).add_to(mymap)
+        # take segment from 1.gpx and compare it against other tracks.
+        # _, segment_points = process_gpx_to_df(GPXDATA + '/1.gpx')
+        # start = time()
+        # llist = find_points_for_segment([convert_latlon_to_xll(lat, lon) for (lat, lon) in segment_points[2090:2332]], points)
+        # print("Matched", len(llist), "times")
+        # print("Time taken", time() - start)
 
-        # def calculate_line_slope(line):
-        #     (x1, y1), (x2, y2) = line
-        #     return (y2 - y1) / (x2 - x1)
+        # for (x, y) in segment_points[2090:2332]:
+        #     folium.CircleMarker(location=[x, y], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
 
-        # def calculate_line_intercept(line):
-        #     (x1, y1), (x2, y2) = line
-        #     return y1 - calculate_line_slope(line) * x1
-
-        # def calculate_line_y(line, x):
-        #     return calculate_line_slope(line) * x + calculate_line_intercept(line)
-
-        # line = [(52.23502,21.18470), (52.229255, 21.186420)]
-        # converted_line = [convert_latlon_to_xll(lat, lon) for (lat, lon) in line]
-
-        # tab_ = []
-        # for x in range(converted_line[0][0], converted_line[1][0] + 1):
-        #     y = int(calculate_line_y(converted_line, x))
-        #     (lat, lon) = convert_xll_to_latlon(x, y)
-        #     folium.CircleMarker(location=[lat, lon], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
-
-        # print(points[:5])
-        # converted_file = [convert_latlon_to_xll(lat, lon) for (lon, lat) in points]
-        # converted_file = [convert_xll_to_latlon(x, y) for x, y in converted_file]
-        # for (x, y) in converted_file:
-        #     folium.CircleMarker(location=[y, x], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
-
-        # Compare segment /1.gpx to current segment
-        _, segment_points = process_gpx_to_df(GPXDATA + '/1.gpx') 
-        print(segment_points[2090:2332])
-        print(convert_latlon_to_xll(segment_points[2090][0], segment_points[2090][1]))
-
-        llist = find_points_for_segment([convert_latlon_to_xll(lat, lon) for (lat, lon) in segment_points[2090:2332]], points)
-        print(len(llist))
-
-        for (x, y) in segment_points[2090:2332]:
-            folium.CircleMarker(location=[x, y], radius=2, color='black', fill=True, fill_color='black', fill_opacity=1).add_to(mymap)
-
-        for i, track in enumerate(llist):
-            track_points = [points[i] for i in track]
-            track_color = colors[2 + i]
-            folium.PolyLine(track_points, color=track_color, weight=2.5, opacity=1).add_to(mymap)
+        # for i, track in enumerate(llist):
+        #     track_points = [points[i] for i in track]
+        #     track_color = colors[2 + i]
+        #     folium.PolyLine(track_points, color=track_color, weight=2.5, opacity=1).add_to(mymap)
 
         map_html = mymap._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
-        # folium.PolyLine(points, color="blue", weight=2.5, opacity=1).add_to(mymap)
-
-        # print(g2.to_html())
-        # table_html = g2.to_html()
-        # table_html = table_html.replace('$', '</a>')
-        # table_html = table_html.replace('#', '>')
-        # table_html = table_html.replace('a href=', '<a href=')
-        # print(table_html)
 
         if result is SUCCESS:
             return render_template('index.html', graph1=data[0], table=tab, map=map_html, filename=filename, filenames=filenames, a=a)
@@ -361,4 +409,7 @@ def index(filename, a, b):
         return render_template('index.html', map=map_html, filenames=filenames)
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+
     app.run(debug=True, port=5001)
