@@ -5,11 +5,12 @@ __pycache__/
 instance/*
 
 gpx_data/
-gpx_data/
 
 static/database/*
 static/temp/*
 static/uploaded_data/*
+
+!__
 
 *.pyc
 __pycache__/

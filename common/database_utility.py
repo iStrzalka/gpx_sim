@@ -33,7 +33,7 @@ def get_map_coverage(db):
 
 def get_list_of_tracks(db):
     """
-    Returns a list of all tracks in the database.
+    Returns a list of all the tracks in the database.
     """
     query = db.session.execute("SELECT * FROM track").fetchall()
     result = []

@@ -23,12 +23,11 @@
                 <td>{{ row[2] }}</td>
                 <td>{{ row[3] }}</td>
                 <td>{{ row[4] }}</td>
-                <td><a href="{{ url_for('index', filename=row[1], a=row[2], b=row[3]) }}">link</a></td>
+                <td><a href="{{ url_for('track', track_id=row[5], a=row[2], b=row[3]) }}">link</a></td>
             </tr>
             {% endfor %}
             </tbody>
         </table>
-    {{table | safe}}
     </div>
     <div class="col-8" style="padding-right: 0px;padding-bottom: 0px;">
         {{ map | safe}}

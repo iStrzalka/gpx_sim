@@ -243,12 +243,6 @@ def plot_directional_change(data, d=0.015, distances = [], cutoff = 0.2):
 
     plt.figure(figsize=(16, 8))
     
-    # print(original_data[:5])
-    # distances = [0]
-    # for i in range(1, len(original_data)):
-    #     distances.append(calculate_distance(original_data[i - 1], original_data[i]))
-    # distances = np.cumsum(distances)
-
     last_id = 0
     green = True
     for i in ids_change:
@@ -339,7 +333,7 @@ def convert(db, gpx_file, converted_file):
 
 # Given segment in (xll, yll) format and list of points in (lat, lon) format
 # returns list of traces that match the segment with at least [PERCENTAGE]% accuracy
-def find_points_for_segment(segment, points):
+def find_points_for_segment(segment, converted):
     HOW_MANY = 10
     DISTANCE_THRESHOLD_METERS = 7
     INDEX_THRESHOLD = 3
@@ -348,8 +342,6 @@ def find_points_for_segment(segment, points):
     def distance_point(point, point2):
         (x1, y1), (x2, y2) = point, point2
         return sqrt((x1 - x2)**2 + (y1 - y2)**2)
-
-    converted = [convert_latlon_to_xll(lat, lon) for (lat, lon) in points]
 
     index_tab = []
     for point in segment:
