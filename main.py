@@ -1,91 +1,39 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
-from utilities import test_against_location, convert_xll_to_latlon
 import folium
 import os
 
 import pandas as pd
-from math import floor
+from math import floor, ceil
 import gpxpy
 
-import matplotlib.pyplot as plt
 import numpy as np
-import io, base64
 from time import time
-import datetime
+
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
 
 from folium.plugins import BeautifyIcon
 
-from utilities import *
+from common.utilities import *
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'static/temp'
-app.config['DATABASE_FOLDER'] = 'static/database'
+app.secret_key = os.environ.get('SECRET_KEY')
+app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER')
+app.config['DATABASE_FOLDER'] = os.environ.get('DATABASE_FOLDER')
+app.config['ORIGINAL_GPX_FOLDER'] = os.environ.get('ORIGINAL_GPX_FOLDER')
+app.config['CONVERTED_GPX_FOLDER'] = os.environ.get('CONVERTED_GPX_FOLDER')
 
+db_name = os.environ.get('DB_NAME')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('SQLALCHEMY_DATABASE_URI')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = os.environ.get('SQLALCHEMY_TRACK_MODIFICATIONS')
 
-db_name = 'gpx_viewer'
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_name}.sqlite3'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
+colors = ['green', 'blue', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue', 'lightgreen', 'gray', 'black', 'lightgray']
 
 DATASET = 'map_data/'
 GPXDATA = 'gpx_data/converted/'
 
-
-class User(db.Model):
-    __tablename__ = 'user'
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(100))
-    email = db.Column(db.String(100))
-    password = db.Column(db.String(100))
-
-    def __init__(self, username, email, password):
-        self.username = username
-        self.email = email
-        self.password = password
-
-
-class Track(db.Model):
-    __tablename__ = 'track'
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    file_name = db.Column(db.String(100))
-    file_path = db.Column(db.String(100))
-    converted_file_path = db.Column(db.String(100))
-    coverted = db.Column(db.Boolean, default=False)
-
-    def __init__(self, user_id, file_name, file_path, converted_file_path):
-        self.user_id = user_id
-        self.file_name = file_name
-        self.file_path = file_path
-        self.converted_file_path = converted_file_path
-        self.converted = False
-
-
-class MapData(db.Model):
-    __tablename__ = 'map_data'
-    id = db.Column(db.Integer, primary_key=True)
-    file_name = db.Column(db.String(100))
-    added_by = db.Column(db.Integer, db.ForeignKey('user.id'))
-    added_date = db.Column(db.DateTime)
-    epsg_code = db.Column(db.Integer)
-    xll = db.Column(db.Integer)
-    yll = db.Column(db.Integer)
-    nrows = db.Column(db.Integer)
-    ncols = db.Column(db.Integer)
-    cellsize = db.Column(db.Integer)
-    
-    def __init__(self, file_name, epsg_code, xll, yll, nrows, ncols, cellsize):
-        self.file_name = file_name
-        self.epsg_code = epsg_code
-        self.xll = xll
-        self.yll = yll
-        self.nrows = nrows
-        self.ncols = ncols
-        self.cellsize = cellsize
-        self.added_date = datetime.datetime.now()
-        self.added_by = None
 
 def is_user_admin():
     return True
@@ -107,6 +55,42 @@ def read_database_file(filename):
             return SUCCESS, (filename, epsg_code, xllcenter, yllcenter, nrows, ncols, cellsize)
     except Exception as e:
         return FAILURE, e
+
+
+def get_base_map(center = (51.9537505,19.1343786), zoom = 7):
+    folium_map = folium.Map(location=center, zoom_start=zoom)
+    folium.TileLayer('http://tile.stamen.com/terrain/{z}/{x}/{y}.jpg', attr='terrain-bcg', name='Terrain Map').add_to(folium_map)
+
+    return folium_map
+
+
+def add_lines_to_map(folium_map, lines, line_colors = None):
+    if line_colors is None:
+        line_colors = colors[1:len(lines) + 1]
+    for i, line in enumerate(lines):
+        folium.PolyLine(line, color=line_colors[i], weight=2.5, opacity=1).add_to(folium_map)
+    return folium_map
+
+
+def add_database_coverage_to_map(folium_map, coverage):
+    for (lat, lon), (lat2, lon2) in coverage:
+        folium.Rectangle(bounds=[(lat, lon), (lat2, lon2)], color='blue', fill=True, fill_opacity=0.2).add_to(folium_map)
+    return folium_map
+
+
+def html_representation_of_map(folium_map):
+    return folium_map._repr_html_().replace('height:0', 'height:calc(100vh - 86px)')
+
+
+@app.route('/test')
+def test():
+    coverage = get_map_coverage(db)
+    folium_map = get_base_map()
+    folium_map = add_database_coverage_to_map(folium_map, coverage)
+    map_html = html_representation_of_map(folium_map)
+
+    filenames = list(sorted(os.listdir(GPXDATA)))
+    return render_template('index.html', map=map_html, filenames=filenames)
 
 
 @app.route('/add_to_database', methods=['POST', 'GET'])
@@ -140,11 +124,45 @@ def add_to_database():
 
 @app.route('/upload', methods=['POST', 'GET'])
 def upload():
-    print(request.method)
+    user = None
+    
     if request.method == 'POST':
         f = request.files['file']
+        if not f.filename.endswith('.gpx'):
+            flash('File must be .gpx')
+            return redirect(url_for('upload'))
         f.save(os.path.join(app.config['UPLOAD_FOLDER'], f.filename))
-        return redirect(url_for(''))
+        
+        # TODO: asyncio convertion? 
+        
+        last_id = len(db.session.query(Track).all())
+
+        coverage = get_database_coverage(db)
+        result, error_message = convert(coverage, 
+                os.path.join(app.config['UPLOAD_FOLDER'], f.filename),
+                os.path.join(app.config['CONVERTED_GPX_FOLDER'], f"{last_id + 1}.pkl"))                                   
+
+        print(result, error_message)
+        if result == SUCCESS:
+            flash('File uploaded successfully')
+        else:
+            flash(error_message)
+            return redirect(url_for('upload'))
+
+        os.rename(os.path.join(app.config['UPLOAD_FOLDER'], f.filename),
+                  os.path.join(app.config['ORIGINAL_GPX_FOLDER'], f"{last_id + 1}.gpx"))
+
+        track = Track(
+            user_id=1,
+            file_name=f.filename,
+            file_path=os.path.join(app.config['ORIGINAL_GPX_FOLDER'], f"{last_id + 1}.gpx"),
+            converted_file_path=os.path.join(app.config['CONVERTED_GPX_FOLDER'], f"{last_id + 1}.pkl")
+        )
+
+        db.session.add(track)
+        db.session.commit()
+
+        return redirect(url_for('track', track_id=track.id))
     else:
         return render_template('upload.html')
 
@@ -165,7 +183,6 @@ def process_gpx_to_df(file_name : str) -> tuple[pd.DataFrame, list]:
     
     return (gpx_df, points)
 
-colors = ['green', 'blue', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue', 'lightgreen', 'gray', 'black', 'lightgray']
 
 
 def add_to_lattitude(lat, lon, dy, dx):
@@ -303,6 +320,66 @@ def compare(filename, start, end):
     return render_template('compare.html', map=map_html, table=tab)
 
 
+def get_directional_change_data(track):
+    points = track['gpx']
+
+    distances = [0]
+    for i in range(1, len(points)):
+        distances.append(calculate_distance(points[i - 1], points[i]))
+    distances = np.cumsum(distances)
+
+    enumerated_elevations = [(i, ele) for i, ele in enumerate(track['elevations'])]
+    plot, ids_change = plot_directional_change(enumerated_elevations, 0.015, distances)
+
+    g2 = table(enumerated_elevations, ids_change)
+    
+    g2['start_id'] = g2['start']
+    g2['end_id'] = g2['end']
+    g2['start'] = g2['start'].apply(lambda a: str(round(distances[a], 2)) + ' km')
+    g2['end'] = g2['end'].apply(lambda a: str(round(distances[a], 2)) + ' km')
+    g2['elevation_gain'] = g2['elevation_gain'].apply(lambda a: str(round(a, 2)) + ' m')
+    g2['elevation_loss'] = g2['elevation_loss'].apply(lambda a: str(round(a, 2)) + ' m')
+
+    # dataframe to list 
+    tab = g2.to_numpy().tolist()
+
+    return SUCCESS, (plot, tab, ids_change)
+
+
+def add_directional_change_lines(folium_map, points, ids_change):
+    ids_change = [0] + ids_change + [len(points)]
+    
+    lines = [points[ids_change[i]:ids_change[i + 1] + 1] for i in range(len(ids_change) - 1)]
+    folium_map = add_lines_to_map(folium_map, lines, ['green', 'red'] * ceil(len(lines) / 2))
+
+    return folium_map
+
+
+def set_optimal_position_and_zoom(folium_map, points):
+    points = np.array(points)
+    folium_map.location = list(points.mean(axis=0))
+    folium_map.fit_bounds([list(points.min(axis=0)), list(points.max(axis=0))])
+    return folium_map
+
+
+@app.route('/track/<track_id>')
+def track(track_id):
+    print(folium.__version__)
+    # TODO : check if user is privileged to see this track
+    track = Track.query.filter_by(id=track_id).first()
+    if not track:
+        return redirect(url_for('index'))
+    track_pkl = pickle.load(open(track.converted_file_path, 'rb'))
+
+    folium_map = get_base_map()
+    folium_map = set_optimal_position_and_zoom(folium_map, track_pkl['gpx'])
+    _, (plot, tab, ids_change) = get_directional_change_data(track_pkl)
+    folium_map = add_directional_change_lines(folium_map, track_pkl['gpx'], ids_change)
+
+    map_html = html_representation_of_map(folium_map)
+    return render_template('index.html', map=map_html, graph1=plot, table=tab, a = 0)
+
+
 
 @app.route('/', defaults={'filename': None, 'a' : None, 'b' : None}, methods=['GET'])
 @app.route('/<filename>', defaults={'a' : None, 'b' : None}, methods=['GET'])
@@ -409,7 +486,10 @@ def index(filename, a, b):
         return render_template('index.html', map=map_html, filenames=filenames)
 
 if __name__ == '__main__':
-    with app.app_context():
+    from models import *
+    from common.database_utility import *
+
+    with app.test_request_context():
         db.create_all()
 
     app.run(debug=True, port=5001)

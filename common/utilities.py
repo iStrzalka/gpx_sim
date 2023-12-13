@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import io, base64
 import numpy as np
 import haversine
+import pickle
 
 R_EARTH = 6378137
 
@@ -70,29 +71,29 @@ def add_to_lattitude(lat, lon, dy, dx):
 
 # Given database path, returns what the database covers in xll, yll values
 # with the path to the file as well as its EPSG code [TODO] 
-def database_covers(database_path):
-    ret = []
+# def database_covers(database_path):
+#     ret = []
 
-    for file_name in os.listdir(database_path):
-        if file_name.endswith('.asc'):
-            with open(database_path + file_name, 'r') as input:
-                lines = [input.readline().strip() for _ in range(4)]
-                ncols = int(lines[0].split(' ')[-1])
-                nrows = int(lines[1].split(' ')[-1])
-                xllcenter = int(floor(float(lines[2].split(' ')[-1])))
-                yllcenter = int(floor(float(lines[3].split(' ')[-1])))
+#     for file_name in os.listdir(database_path):
+#         if file_name.endswith('.asc'):
+#             with open(database_path + file_name, 'r') as input:
+#                 lines = [input.readline().strip() for _ in range(4)]
+#                 ncols = int(lines[0].split(' ')[-1])
+#                 nrows = int(lines[1].split(' ')[-1])
+#                 xllcenter = int(floor(float(lines[2].split(' ')[-1])))
+#                 yllcenter = int(floor(float(lines[3].split(' ')[-1])))
 
-                epsg_code = test_against_location(xllcenter, yllcenter)
+#                 epsg_code = test_against_location(xllcenter, yllcenter)
 
-                ret.append(((xllcenter, yllcenter), (xllcenter + ncols - 1, yllcenter + nrows - 1), database_path + file_name))
+#                 ret.append(((xllcenter, yllcenter), (xllcenter + ncols - 1, yllcenter + nrows - 1), database_path + file_name))
 
-    return ret
+#     return ret
 
 
 # Given path to file, returns its estimated elevation data
 def get_data(file_name):
     data = []
-    with open(file_name, 'r') as input:    
+    with open(os.path.join(os.environ.get('DATABASE_FOLDER'), file_name), 'r') as input:    
         lines = input.readlines()
         lines = [line.strip() for line in lines]
 
@@ -103,60 +104,61 @@ def get_data(file_name):
     return data
 
 
-# Given path to gpx file, return list of points in format ((lon, lat), elevation)
-def parse_gpx_to_points(file_name):
-    gpx = parse(open(file_name, 'r'))
+# # Given path to gpx file, return list of points in format ((lon, lat), elevation)
+# def parse_gpx_to_points(file_name):
+#     gpx = parse(open(file_name, 'r'))
 
-    points = []
-    for track in gpx.tracks:
-        for segment in track.segments:
-            for point in segment.points:
-                points.append(((point.longitude, point.latitude), point.elevation))
+#     points = []
+#     for track in gpx.tracks:
+#         for segment in track.segments:
+#             for point in segment.points:
+#                 points.append(((point.longitude, point.latitude), point.elevation, point.time if point.time else 'NA'))
 
-    return points
+#     return points
 
 
-# Given path to gpx file as well as new elevations, creates new gpx file with new elevations.
-def create_new_gpx(file_name, new_elevations, new_file_name):
-    gpx = parse(open(file_name, 'r'))
+# # Given path to gpx file as well as new elevations, creates new gpx file with new elevations.
+# def create_new_gpx(file_name, new_elevations, new_file_name):
+#     gpx = parse(open(file_name, 'r'))
 
-    for track in gpx.tracks:
-        for segment in track.segments:
-            for point, elevation in zip(segment.points, new_elevations):
-                point.elevation = elevation
+#     for track in gpx.tracks:
+#         for segment in track.segments:
+#             for point, elevation in zip(segment.points, new_elevations):
+#                 point.elevation = elevation
 
-    with open(new_file_name, 'w') as output:
-        output.write(gpx.to_xml())
+#     with open(new_file_name, 'w') as output:
+#         output.write(gpx.to_xml())
 
-cur_node = ((-1, -1), (-1, -1), [])
+# ((xll1, yll1), (xll2, yll2), path_to_file, epsg_code)
+cur_node = None
 
 
 # Given dataset and xll, yll values finds new database file that contains those values
 # returns it in format ((xll1, yll1), (xll2, yll2), data)
 def find_new_node(dataset, x, y):
-    for node in dataset:
-        (x1, y1), (x2, y2), _ = node
-        for i in range(MIN_EPSG, MAX_EPSG + 1):
-            xll, yll = convert_latlon_to_xll(x, y, i)
+    # TODO : This probably can be done faster (binary tree?)
+    for epsg_code in range(MIN_EPSG, MAX_EPSG + 1):
+        for node in dataset[epsg_code]:
+            (x1, y1), (x2, y2), file_name = node
+            xll, yll = convert_latlon_to_xll(x, y, epsg_code)
             if x1 <= xll <= x2 and y1 <= yll <= y2:
-                data = get_data(node[2])
-                return (SUCCESS, ((x1, y1), (x2, y2), data))
+                data = get_data(file_name)
+                return (SUCCESS, ((x1, y1), (x2, y2), data, epsg_code))
     return (FAILURE, f"Node for ({x}, {y}) not found in dataset.")
 
 
 # Given dataset and lattitude and longitude values, returns elevation for those values
 def find_elevation(dataset, lat, lon):
-    x, y = convert_latlon_to_xll(lat, lon)
-    x, y = int(round(x, 1)), int(round(y, 1))
-
     global cur_node
     try:
-        (x1, y1), (x2, y2), data = cur_node
+        (x1, y1), (x2, y2), data, epsg_code = cur_node
     except:
         (result, cur_node) = find_new_node(dataset, lat, lon)
         if result == FAILURE:
             return (FAILURE, cur_node)
-        (x1, y1), (x2, y2), data = cur_node
+        (x1, y1), (x2, y2), data, epsg_code = cur_node
+    
+    x, y = convert_latlon_to_xll(lat, lon, epsg_code)
     
     if x1 <= x <= x2 and y1 <= y <= y2:
         return (SUCCESS, data[y2 - y][x - x1])
@@ -164,19 +166,19 @@ def find_elevation(dataset, lat, lon):
         (result, cur_node) = find_new_node(dataset, lat, lon)
         if result == FAILURE:
             return (FAILURE, cur_node)
-        (x1, _), (_, y2), data = cur_node
+        (x1, _), (_, y2), data, _ = cur_node
         return (SUCCESS, data[y2 - y][x - x1])
     
 
-# Given dataset and list of points, returns list of elevations for those points
-def get_elevation_for_points(dataset, points):
-    ret = []
-    for (lon, lat), _ in points:
-        (result, elevation) = find_elevation(dataset, lat, lon)
-        if result == FAILURE:
-            return (FAILURE, (lat, lon))
-        ret.append(elevation)
-    return (SUCCESS, ret)
+# # Given dataset and list of points, returns list of elevations for those points
+# def get_elevation_for_points(dataset, points):
+#     ret = []
+#     for (lon, lat), _ in points:
+#         (result, elevation) = find_elevation(dataset, lat, lon)
+#         if result == FAILURE:
+#             return (FAILURE, (lat, lon))
+#         ret.append(elevation)
+#     return (SUCCESS, ret)
 
 
 # Given dataset and list of points, cut elevation change to threshold
@@ -295,20 +297,44 @@ def table(original_data, ids_change, cutoff = 0.2):
     for i in ids_change:
         llist.append([last_id, i, y_up[i] - y_up[last_id], y_down[i] - y_down[last_id]])
         last_id = i
-    llist.append([last_id, len(y), y_up[-1] - y_up[last_id], y_down[-1] - y_down[last_id]])
+    llist.append([last_id, len(y) - 1, y_up[-1] - y_up[last_id], y_down[-1] - y_down[last_id]])
 
     return pd.DataFrame(llist, columns=['start', 'end', 'elevation_gain', 'elevation_loss'])
 
 
-def convert(dataset, gpx_file, converted_file):
-    df = database_covers(dataset)
-    points = parse_gpx_to_points(gpx_file)
-    result, elevation_map = get_elevation_for_points(df, points)
 
-    if result is FAILURE:
-        return FAILURE, elevation_map
+def convert(db, gpx_file, converted_file):
+    # df = database_covers(dataset)
+    # points = parse_gpx_to_points(gpx_file)
+    try:
+        gpx = parse(open(gpx_file, 'r'))
+    except:
+        return FAILURE, "Couldn't parse gpx file."
 
-    create_new_gpx(gpx_file, elevation_map, converted_file)
+    output = {
+        'gpx': [],
+        'elevations': [],
+        'time': []
+    }
+    for epsg_code in range(MIN_EPSG, MAX_EPSG + 1):
+        output[epsg_code] = []
+    track = gpx.tracks[0]
+    for segment in track.segments:        
+        for point in segment.points:
+            result, elevation = find_elevation(db, point.latitude, point.longitude)
+            if result == FAILURE:
+                return FAILURE, elevation
+            output['gpx'].append((point.latitude, point.longitude))
+            output['elevations'].append(elevation)
+            output['time'].append(point.time)
+            for epsg_code in range(MIN_EPSG, MAX_EPSG + 1):
+                xll, yll = convert_latlon_to_xll(point.latitude, point.longitude, epsg_code)
+                output[epsg_code].append((int(xll), int(yll)))
+
+    with open(converted_file, 'wb') as output_file:
+        pickle.dump(output, output_file)
+
+    return SUCCESS, -1
 
 
 # Given segment in (xll, yll) format and list of points in (lat, lon) format
@@ -329,7 +355,6 @@ def find_points_for_segment(segment, points):
     for point in segment:
         distances = [(distance_point(point, point2), i) for i, point2 in enumerate(converted)]
         distances.sort()
-        # cut to 3meters distance
         distances = [(d, i) for d, i in distances if d < DISTANCE_THRESHOLD_METERS]
         indexes = [i for _, i in distances[:HOW_MANY]]
         indexes.sort()
