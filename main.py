@@ -17,6 +17,8 @@ load_dotenv(find_dotenv())
 from folium.plugins import BeautifyIcon, TimestampedGeoJson
 
 from common.utilities import *
+import sys
+sys.setrecursionlimit(2001)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY')
@@ -29,7 +31,7 @@ db_name = os.environ.get('DB_NAME')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('SQLALCHEMY_DATABASE_URI')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = os.environ.get('SQLALCHEMY_TRACK_MODIFICATIONS')
 
-colors = ['green', 'blue', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'white', 'pink', 'lightblue', 'lightgreen', 'gray', 'black', 'lightgray']
+colors = "Blue Red Black Grey Orange White Brown Pink Yellow Green Purple Maroon Turquoise Cyan Navy blue Gold Tomato Teal Lime Cyan Wheat Salmon Olive Aqua Violet".split(' ')
 
 DATASET = 'map_data/'
 GPXDATA = 'gpx_data/converted/'
@@ -139,13 +141,14 @@ def set_optimal_position_and_zoom(folium_map, points):
 
 @app.route('/')
 def index():
-    coverage = get_map_coverage(db)
-    folium_map = get_base_map()
-    folium_map = add_database_coverage_to_map(folium_map, coverage)
-    map_html = html_representation_of_map(folium_map)
+    return redirect(url_for('tracklist'))
+    # coverage = get_map_coverage()
+    # folium_map = get_base_map()
+    # folium_map = add_database_coverage_to_map(folium_map, coverage)
+    # map_html = html_representation_of_map(folium_map)
 
-    # filenames = list(sorted(os.listdir(GPXDATA)))
-    return render_template('index.html', map=map_html)#, filenames=filenames)
+    # # filenames = list(sorted(os.listdir(GPXDATA)))
+    # return render_template('index.html', map=map_html)#, filenames=filenames)
 
 
 @app.route('/tracklist')
@@ -213,7 +216,7 @@ def upload():
         
         last_id = len(db.session.query(Track).all())
 
-        coverage = get_database_coverage(db)
+        coverage = get_database_coverage()
         result, error_message = convert(coverage, 
                 os.path.join(app.config['UPLOAD_FOLDER'], f.filename),
                 os.path.join(app.config['CONVERTED_GPX_FOLDER'], f"{last_id + 1}.pkl"))                                   
@@ -254,8 +257,8 @@ def add_blue_point(folium_map, location, tooltip):
     return folium_map
 
 
-def add_timed_points(folium_map, original_track, original_time, distances, other_tracks = None, other_times = None):
-    def point(color, lat, lon, time, distance, tooltip):
+def add_timed_points(folium_map, track, times, distances, color, startstop = False):
+    def point(lat, lon, time, distance, tooltip, popup):
         return {
             'type': 'Feature',
             'geometry': {
@@ -264,7 +267,7 @@ def add_timed_points(folium_map, original_track, original_time, distances, other
             },
             'properties': {
                 'time': time.isoformat(),
-                'popup' : f'Point {round(distance, 2)}km',
+                'popup' : popup,
                 'tooltip': tooltip,
                 'icon': 'circle',
                 'iconstyle': {
@@ -276,13 +279,13 @@ def add_timed_points(folium_map, original_track, original_time, distances, other
         }
 
     data = []
-    for i, (lat, lon) in enumerate(original_track):
-        data.append(point('red', lat, lon, original_time[i], distances[i], f'Point {round(distances[i], 2)}km'))
-
-    if other_tracks is not None:
-        for i, track in enumerate(other_tracks):
-            for j, (lat, lon) in enumerate(track):
-                data.append(point(colors[1 + i], lat, lon, other_times[i][j], distances[j], f'Point {round(distances[j], 2)}km'))
+    for i, (lat, lon) in enumerate(track):
+        popup = f'Point {round(distances[i], 2)}km'
+        if startstop:
+            popup = f"""<button class="Set as start" onclick="parent.set_start({i})">Set as start</button><br>
+                        <button class="Set as end" onclick="parent.set_end({i})">Set as end</button>"""
+        
+        data.append(point(lat, lon, times[i], distances[i], f'Point {round(distances[i], 2)}km', popup))
 
     TimestampedGeoJson({
         'type': 'FeatureCollection',
@@ -297,8 +300,8 @@ def add_timed_points(folium_map, original_track, original_time, distances, other
     return folium_map
 
 
-@app.route('/compare2/<track_id>/<start>/<end>')
-def compare2(track_id, start, end):
+@app.route('/compare/<track_id>/<start>/<end>')
+def compare(track_id, start, end):
     track = Track.query.filter_by(id=track_id).first()
     if not track:
         return redirect(url_for('index'))
@@ -310,13 +313,17 @@ def compare2(track_id, start, end):
     for key in track_pkl.keys():
         track_pkl[key] = track_pkl[key][start:end]
 
+    
     all_tracks = Track.query.all()
+    all_tracks.remove(track)
     result = []
+    result_timed = []
     tab = []
+    tab.append(('blue', track.file_name, start, end, track_pkl['time'][-1] - track_pkl['time'][0] if track_pkl['time'][0] else 'NA', track.id))
     color_tag = 1
     for track in all_tracks:
         track_pkl2 = pickle.load(open(track.converted_file_path, 'rb'))
-        traces = find_points_for_segment(track_pkl['gpx'], track_pkl2['gpx'])
+        traces = find_points_for_segment(track_pkl[2178], track_pkl2[2178])
         for trace in traces:
             result.append([track_pkl2['gpx'][i] for i in trace])
 
@@ -324,6 +331,9 @@ def compare2(track_id, start, end):
             diff = 'NA'
             if track_pkl2['time'][0] != None:
                 diff = track_pkl2['time'][trace[-1]] - track_pkl2['time'][trace[0]]
+                result_timed.append([track_pkl2['time'][i] for i in trace])
+            else:
+                result_timed.append(None)
 
             tab.append((colors[color_tag], track.file_name, trace[0], trace[-1], diff, track.id))
 
@@ -332,6 +342,24 @@ def compare2(track_id, start, end):
     folium_map = get_base_map()
     folium_map = set_optimal_position_and_zoom(folium_map, track_pkl['gpx'])
     folium_map = add_lines_to_map(folium_map, result)
+
+    distances = [0]
+    for i in range(1, len(track_pkl['gpx'])):
+        distances.append(calculate_distance(track_pkl['gpx'][i - 1], track_pkl['gpx'][i]))
+    distances = np.cumsum(distances)
+    
+    print(tab)
+
+    folium_map = add_lines_to_map(folium_map, [track_pkl['gpx']], ['blue'])
+
+    if track_pkl['time'][0] != None:
+        folium_map = add_timed_points(folium_map, track_pkl['gpx'], track_pkl['time'], distances, 'blue')
+        for i in range(len(result_timed)):
+            if result_timed[i] != None:
+                start_time = track_pkl['time'][0]
+                s_time = result_timed[i][0]
+                result_timed[i] = [s_time] + [start_time + (x - s_time) for x in result_timed[i][1:]]
+                folium_map = add_timed_points(folium_map, result[i], result_timed[i], distances, colors[i + 1])
 
     map_html = html_representation_of_map(folium_map)
     return render_template('compare.html', map=map_html, table=tab)
@@ -366,14 +394,39 @@ def track(track_id, a, b):
     folium_map = add_directional_change_lines(folium_map, track_pkl['gpx'], ids_change)
 
     if track_pkl['time'][0] != None:
-        add_timed_points(folium_map, track_pkl['gpx'], track_pkl['time'], distances)
+        add_timed_points(folium_map, track_pkl['gpx'], track_pkl['time'], distances, 'blue', True)
 
     for i, val in enumerate(ids_change):
         tooltip = f'Going {"down" if i % 2 == 0 else "up"}.\nPoint {round(distances[val], 2)}km'
         folium_map = add_blue_point(folium_map, track_pkl['gpx'][val], tooltip)
 
     map_html = html_representation_of_map(folium_map)
-    return render_template('index.html', map=map_html, graph1=plot, table=tab, a = a, my_id = track_id)
+    return render_template('track.html', map=map_html, graph1=plot, table=tab, a = a, b = b, my_id = track_id)
+
+
+@app.route('/peek')
+def peek():
+    base_map = get_base_map()
+    base_map = add_database_coverage_to_map(base_map, get_map_coverage())
+
+    filenames = list(sorted(os.listdir(app.config['ORIGINAL_GPX_FOLDER'])))
+    
+    for i, filename in enumerate(filenames):
+        track = parse(open(os.path.join(app.config['ORIGINAL_GPX_FOLDER'], filename)), 'r')
+        points = []
+        for segment in track.tracks[0].segments:
+            for point in segment.points:
+                points.append((point.latitude, point.longitude))
+        
+        fg = folium.FeatureGroup(name=filename, show=True)
+        folium.PolyLine(points, color=colors[i + 1], weight=2.5, opacity=1).add_to(fg)
+
+        base_map.add_child(fg)
+
+    folium.LayerControl().add_to(base_map)
+
+    map_html = html_representation_of_map(base_map)
+    return render_template('peek.html', map=map_html, filenames=filenames)        
 
 
 if __name__ == '__main__':

@@ -298,8 +298,6 @@ def table(original_data, ids_change, cutoff = 0.2):
 
 
 def convert(db, gpx_file, converted_file):
-    # df = database_covers(dataset)
-    # points = parse_gpx_to_points(gpx_file)
     try:
         gpx = parse(open(gpx_file, 'r'))
     except:
@@ -331,12 +329,13 @@ def convert(db, gpx_file, converted_file):
     return SUCCESS, -1
 
 
-# Given segment in (xll, yll) format and list of points in (lat, lon) format
-# returns list of traces that match the segment with at least [PERCENTAGE]% accuracy
+# Returns list of traces that match the segment with at least [PERCENTAGE]% accuracy
+# TODO : Change entire alghorihtm to a faster one
+# TODO : Probably something using 2D-Trees
 def find_points_for_segment(segment, converted):
     HOW_MANY = 10
-    DISTANCE_THRESHOLD_METERS = 7
-    INDEX_THRESHOLD = 3
+    DISTANCE_THRESHOLD_METERS = 10
+    INDEX_THRESHOLD = 50
     PERCENTAGE = 0.95
 
     def distance_point(point, point2):
@@ -366,7 +365,6 @@ def find_points_for_segment(segment, converted):
                 if result:
                     return (True, data + [(i, j)]) 
         
-
         do_not_continue[dnc[0]][dnc[1]] = True
         return (False, i)
 
@@ -392,4 +390,5 @@ def find_points_for_segment(segment, converted):
         else:
             unique_traces.append(trace)
 
+    # print(unique_traces)
     return unique_traces

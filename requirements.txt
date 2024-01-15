@@ -1,0 +1,10 @@
+pandas
+gpxpy
+folium
+flask
+flask_sqlalchemy
+matplotlib
+haversine
+python-dotenv
+pyproj
+Werkzeug==2.2.2

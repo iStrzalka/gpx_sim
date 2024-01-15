@@ -9,6 +9,8 @@ gpx_data/
 static/database/*
 static/temp/*
 static/uploaded_data/*
+static/gpx/converted/*
+static/gpx/original/*
 
 !__
 
